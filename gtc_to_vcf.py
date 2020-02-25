@@ -309,7 +309,7 @@ def main():
         driver(gtc_paths, manifest_reader, genome_reader, output_vcf_files, args.expand_identifiers, args.unsquash_duplicates, auxiliary_records, args.include_attributes, logger)
     except Exception as exception:
         logger.error(str(exception))
-        logger.debug(traceback.format_exc(exception))
+        logger.debug(traceback.format_exc())
         sys.exit(-1)
 
 if __name__ == "__main__":
