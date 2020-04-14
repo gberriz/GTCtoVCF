@@ -1,3 +1,6 @@
+from pdb import set_trace as ST
+from pprint import pprint as PP
+
 from LocusEntry import LocusEntry
 from IlluminaBeadArrayFiles import RefStrand
 
@@ -6,7 +9,7 @@ class LocusEntryFactory(object):
     Class to create locus entries from BPM records
     """
 
-    def __init__(self, vcf_record_factory, chrom_order, unsquash_duplicates, logger):
+    def __init__(self, vcf_record_factory, chrom_order, unsquash_duplicates, split_multiallelics, logger):
         """
         Create new locus entry factory
 
@@ -19,6 +22,7 @@ class LocusEntryFactory(object):
         self._vcf_record_factory = vcf_record_factory
         self._chrom_order = chrom_order
         self._unsquash_duplicates = unsquash_duplicates
+        self._split_multiallelics = split_multiallelics
         self._logger = logger
 
     def create_locus_entries(self, bpm_reader):
@@ -43,9 +47,50 @@ class LocusEntryFactory(object):
         Group BPM records into groups where all BPM records in a single
         group will be represented in the same VCF record
 
+        The settings of the --unsquash-duplicates and --split-multiallelics
+        options affect how BPM records are grouped.
+
+        If there is only one BPM record for a given position, this record will
+        be yielded as a singleton list.
+
+        If neither --unsquash-duplicates nor --split-multiallelics is set, all
+        the BPM records for a given position are yielded as a list.
+
+        If either --unsquash-duplicates or --split-multiallelics are specified,
+        and there multiple BPM records for a given position, these records will
+        be grouped as described below, and these groups will be yielded one at
+        a time.
+
+        CASE 1: the position is biallelic (in other words, the same ALT allele
+                appears in all the BPM records for this position).
+
+                In this case, the --split-multiallelics flag is not applicable.
+
+                Therefore, if the --unsquash-duplicates flag is True, the
+                individual BPM records will be yielded as singleton lists, one
+                at a time.  Otherewise, they will be yielded together as a
+                single list.
+
+        CASE 2: the position is multiallelic (in other words, more than one ALT
+                allele appear among the BPM records for this position).
+
+                If --split-multiallelics is not set, then all the records for
+                this position will be yielded together as a single group.
+                (Note, in particular, that in this case, the
+                --unsquash-duplicates flag will have no effect, irrespective of
+                the duplicates that may exist within the group.)
+
+                If --split-multiallelics is set, and --unsquash-duplicates is
+                also set, then the individual BPM records will be yielded as
+                singleton lists, one at a time.
+
+                If --split-multiallelics is set, but --unsquash-duplicates is
+                not set, then the BPM records for a given position will be
+                grouped according to their ALT allele (thus creating groups of
+                duplicates), and these groups will be yielded one at a time.
+
         Args:
-            bpm_reader (BPMReader): Provides BPM records
-            loci_to_filter (set(string)): Set of loci names to filter from the manifest
+            bpm_records (BPMReader): Provides BPM records
 
         Yields:
             list(BPMRecord): Next group of BPM records
@@ -56,15 +101,65 @@ class LocusEntryFactory(object):
             position2record.setdefault(position, []).append(record)
 
         for _, value in position2record.items():
-            if len(value) > 1 and self._unsquash_duplicates:
-                alleles = set()
+
+            if (len(value) > 1 and
+                (self._unsquash_duplicates or self._split_multiallelics)):
+
+                refs = set()
+                duplicates_grouped_by_alt = dict()
+
                 for bpm_record in value:
-                    alleles.update(bpm_record.plus_strand_alleles)
-                if len(alleles) == 2:
-                    for bpm_record in value:
-                        yield [bpm_record]
+                    ref, alt = bpm_record.plus_strand_alleles
+                    refs.add(ref)
+                    (duplicates_grouped_by_alt.setdefault(alt, [])
+                     .append(bpm_record))
+
+                assert len(refs) == 1
+
+                nalts = len(duplicates_grouped_by_alt.value())
+
+                if nalts == 1:
+
+                    # POSITION IS BIALLELIC
+
+                    # nalts == 1 means that there is only one alt allele for
+                    # this position; in other words, this is a biallelic
+                    # position; hence --split-multiallelics has no effect in
+                    # this if-branch.
+
+                    if self._unsquash_duplicates:
+                        for bpm_record in value:
+                            yield [bpm_record]
+                    else:
+                        yield value
+
                 else:
-                    yield value
+
+                    # POSITION IS MULTIALLELIC
+
+                    assert nalts > 1
+                    # nalts > 1 means that there are multiple alt alleles for
+                    # this position; in other words, this is a multiallelic
+                    # position, and therefore --split-multiallelics has an
+                    # effect in this if-branch.
+
+                    if self._split_multiallelics:
+                        if self._unsquash_duplicates:
+                            for bpm_record in value:
+                                yield [bpm_record]
+                        else:
+                            for group in duplicates_grouped_by_alt.values():
+                                yield group
+                    else:
+                        assert self._unsquash_duplicates
+
+                        # Since self._split_multiallelics is False here, we
+                        # cannot split the current multiallelic position, and
+                        # therefore the fact that self._unsquash_duplicates is
+                        # True has no effect.
+
+                        yield value
+
             else:
                 yield value
 

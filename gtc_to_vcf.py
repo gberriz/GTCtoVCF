@@ -134,11 +134,11 @@ def read_auxiliary_records(auxiliary_loci):
         return auxiliary_records
     return None
 
-def driver(gtc_files, manifest_reader, genome_reader, output_vcf_files, expand_identifiers, unsquash_duplicates, auxiliary_records, attrs_to_include, logger):
+def driver(gtc_files, manifest_reader, genome_reader, output_vcf_files, expand_identifiers, unsquash_duplicates, split_multiallelics, auxiliary_records, attrs_to_include, logger):
     format_factory = FormatFactory(gtc_files[0] is None, attrs_to_include, logger)
     reader_template_factory = ReaderTemplateFactory(genome_reader, format_factory, "4.1", "gtc_to_vcf " + VERSION, genome_reader.get_contig_order(), logger)
     vcf_record_factory = VcfRecordFactory(format_factory, genome_reader, expand_identifiers, auxiliary_records, logger)
-    locus_entries = LocusEntryFactory(vcf_record_factory, genome_reader.get_contig_order(), unsquash_duplicates, logger).create_locus_entries(manifest_reader)
+    locus_entries = LocusEntryFactory(vcf_record_factory, genome_reader.get_contig_order(), unsquash_duplicates, split_multiallelics, logger).create_locus_entries(manifest_reader)
 
     for (gtc_file, output_vcf_file) in zip(gtc_files, output_vcf_files):
         if gtc_file:
@@ -277,6 +277,7 @@ def main():
     parser.add_argument("--log-file", dest="log_file", default=None, required=False, help="File to write logging information (optional)")
     parser.add_argument("--expand-identifiers", dest="expand_identifiers", action="store_true", default=False, help="For VCF entries with multiple corresponding manifest entries, list all manifest identifiers in VCF ID field")
     parser.add_argument("--unsquash-duplicates", dest="unsquash_duplicates", action="store_true", default=False, help="Generate unique VCF records for duplicate assays")
+    parser.add_argument("--split-multiallelics", dest="split_multiallelics", action="store_true", default=False, help="Generate separate VCF records for probes for multiallelic sites")
     parser.add_argument("--auxiliary-loci", dest="auxiliary_loci", default=None, required=False, help="VCF file with auxiliary definitions of loci (optional)")
     parser.add_argument("--filter-loci", dest="filter_loci", default=None, required=False, help="File containing list of loci names to filter from input manifest (optional)")
     parser.add_argument("--disable-genome-cache", dest="disable_genome_cache", default=False, action="store_true", help="Disable caching of genome reference data")
@@ -306,7 +307,7 @@ def main():
         manifest_reader = get_manifest_reader(args.manifest_file, genome_reader, loci_to_filter, args.skip_indels, logger)
         auxiliary_records = read_auxiliary_records(args.auxiliary_loci)
 
-        driver(gtc_paths, manifest_reader, genome_reader, output_vcf_files, args.expand_identifiers, args.unsquash_duplicates, auxiliary_records, args.include_attributes, logger)
+        driver(gtc_paths, manifest_reader, genome_reader, output_vcf_files, args.expand_identifiers, args.unsquash_duplicates, args.split_multiallelics, auxiliary_records, args.include_attributes, logger)
     except Exception as exception:
         logger.error(str(exception))
         logger.debug(traceback.format_exc(exception))
